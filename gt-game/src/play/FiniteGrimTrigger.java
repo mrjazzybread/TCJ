@@ -1,15 +1,17 @@
 package play;
 
+import gametree.GameNode;
+import gametree.GameNodeDoesNotExistException;
+import play.exception.InvalidStrategyException;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 
-import gametree.GameNode;
-import gametree.GameNodeDoesNotExistException;
-import play.exception.InvalidStrategyException;
+public class FiniteGrimTrigger extends Strategy {
 
-public class GrimTriggerStrategy extends Strategy {
+    private final static float STOP = .001F;
 
     private List<GameNode> getReversePath(GameNode current) {
         try {
@@ -57,13 +59,17 @@ public class GrimTriggerStrategy extends Strategy {
 
     @Override
     public void execute() throws InterruptedException {
-        System.err.println("Grim Trigger Strategy is now active...");
+        System.err.println("Finite Grim Trigger Strategy is now active...");
         while (!this.isTreeKnown()) {
             System.err.println("Waiting for game tree to become available.");
             Thread.sleep(1000);
         }
 
-        boolean trigger = false;
+        boolean trigger;
+        double payoffD = 0;
+        double payoffC = 0;
+        double lastBeta = 0;
+        int lastIterationCalculated = 0;
 
         while (true) {
 
@@ -73,36 +79,54 @@ public class GrimTriggerStrategy extends Strategy {
             PlayStrategy myStrategy = this.getStrategyRequest();
             if (myStrategy == null) //Game was terminated by an outside event
                 break;
-            if (myStrategy.isFirstRound()) {
-                //trigger = myStrategy.getMaximumNumberOfIterations() > 1000000;
-                double beta = myStrategy.probabilityForNextIteration();
-                GameNode root = this.tree.getRootNode();
-                Iterator<GameNode> nodes = root.getChildren();
-                GameNode child1 = nodes.next();
-                GameNode child2 = nodes.next();
-                GameNode bothcoop, deffect1, bothdeffect;
-                if (!child1.getLabel().toLowerCase(Locale.ROOT).contains("cooperate")) {
-                    GameNode aux = child1;
-                    child1 = child2;
-                    child2 = aux;
-                }
-                nodes = child1.getChildren();
-                bothcoop = nodes.next();
-                deffect1 = nodes.next();
-                if (!bothcoop.getLabel().toLowerCase(Locale.ROOT).contains("cooperate")) {
-                    GameNode aux = bothcoop;
-                    bothcoop = deffect1;
-                    deffect1 = aux;
-                }
-                nodes = child2.getChildren();
-                bothdeffect = nodes.next();
-                if (!bothdeffect.getLabel().toLowerCase(Locale.ROOT).contains("defect"))
-                    bothdeffect = nodes.next();
 
-
-                trigger = defect(beta, bothcoop.getPayoffP1(), deffect1.getPayoffP2(), bothdeffect.getPayoffP1());
-
+            GameNode root = this.tree.getRootNode();
+            Iterator<GameNode> nodes = root.getChildren();
+            GameNode child1 = nodes.next();
+            GameNode child2 = nodes.next();
+            GameNode bothcoop, deffect1, bothdeffect;
+            if (!child1.getLabel().toLowerCase(Locale.ROOT).contains("cooperate")) {
+                GameNode aux = child1;
+                child1 = child2;
+                child2 = aux;
             }
+            nodes = child1.getChildren();
+            bothcoop = nodes.next();
+            deffect1 = nodes.next();
+            if (!bothcoop.getLabel().toLowerCase(Locale.ROOT).contains("cooperate")) {
+                GameNode aux = bothcoop;
+                bothcoop = deffect1;
+                deffect1 = aux;
+            }
+            nodes = child2.getChildren();
+            bothdeffect = nodes.next();
+            if (!bothdeffect.getLabel().toLowerCase(Locale.ROOT).contains("defect"))
+                bothdeffect = nodes.next();
+            double beta = myStrategy.probabilityForNextIteration();
+
+            if (myStrategy.isFirstRound()) {
+                payoffD = deffect1.getPayoffP2();
+                payoffC = bothcoop.getPayoffP1();
+                lastBeta = 1;
+                for (int i = 1; i < myStrategy.getMaximumNumberOfIterations(); i = i + 1) {
+                    double addedPayoffD = bothdeffect.getPayoffP1() * lastBeta * beta;
+                    if (addedPayoffD <= STOP)
+                        break;
+                    lastBeta = lastBeta * beta;
+                    payoffD = payoffD + addedPayoffD;
+                    payoffC = payoffC + bothcoop.getPayoffP1() * lastBeta;
+                    lastIterationCalculated = i;
+                }
+            }
+            if (lastIterationCalculated + 1 >= myStrategy.getMaximumNumberOfIterations()) {
+                lastIterationCalculated = lastIterationCalculated - 1;
+                payoffC = payoffC - bothcoop.getPayoffP1() * lastBeta;
+                payoffD = payoffD - bothdeffect.getPayoffP2() * lastBeta;
+                lastBeta = lastBeta / beta;
+            }
+            System.out.println(payoffC + " " + payoffD);
+            trigger = payoffC <= payoffD;
+
             boolean playComplete = false;
             while (!playComplete) {
                 if (myStrategy.getFinalP1Node() != -1) {
@@ -121,7 +145,6 @@ public class GrimTriggerStrategy extends Strategy {
                 myStrategy.getMaximumNumberOfIterations();
                 if (!trigger && finalP1 != null && finalP2 != null)
                     trigger = cumputeTrigger(finalP1, finalP2);
-
                 Iterator<String> iterator = myStrategy.keyIterator();
                 List<String> keys = new ArrayList<>();
                 while (iterator.hasNext())
@@ -143,10 +166,4 @@ public class GrimTriggerStrategy extends Strategy {
         }
     }
 
-    private boolean defect(double beta, double coopPayoff, double deffectPayoff, double bothPlayerDeffectPayoff) {
-        return beta != 1 && coopPayoff / (1 - beta) < deffectPayoff + (bothPlayerDeffectPayoff * beta) / (1 - beta);
-    }
-
 }
-
-

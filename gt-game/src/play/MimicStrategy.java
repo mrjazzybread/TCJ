@@ -182,7 +182,6 @@ public class MimicStrategy extends Strategy {
                     playComplete = true;
                 } catch (InvalidStrategyException e) {
                     System.err.println("Invalid strategy: " + e.getMessage());
-                    ;
                     e.printStackTrace(System.err);
                 }
             }
